@@ -58,6 +58,10 @@ public:
   ///* Sigma point spreading parameter
   double lambda_;
 
+  // Output streams for NIS values.
+  std::ofstream nis_laser_;
+  std::ofstream nis_radar_;
+
   /**
    * Constructor
    */
@@ -101,9 +105,9 @@ private:
   void PredictMeanAndCovariance();
 
   // Auxiliary methods for the update step.
-  void Update(const MeasurementPackage& meas_package,
-              const MatrixXd& Zsig,
-              const MatrixXd& R /* noise covariance matrix */);
+  double Update(const MeasurementPackage& meas_package,
+                const MatrixXd& Zsig,
+                const MatrixXd& R /* noise covariance matrix */);
 };
 
 #endif /* UKF_H */

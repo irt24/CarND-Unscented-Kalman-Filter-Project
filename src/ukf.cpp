@@ -30,8 +30,27 @@ UKF::UKF() {
   time_us_ = 0;
 
   // Process noise (had to be tweaked).
-  std_a_ = 0.2;      // Process noise standard deviation longitudinal acceleration in m/s^2.
-  std_yawdd_ = 0.2;  // Process noise standard deviation yaw acceleration in rad/s^2.
+  //
+  // The corresponding NIS values are:
+  // LASER
+  //   10th percentile. Desirable: 0.211000. Actual: 0.206136.
+  //   90th percentile. Desirable: 4.605000. Actual: 4.198828.
+  //   5th percentile. Desirable: 0.103000. Actual: 0.120366.
+  //   95th percentile. Desirable: 5.991000. Actual: 5.011146.
+  //
+  // RADAR
+  //   10th percentile. Desirable: 0.584000. Actual: 0.581630.
+  //   90th percentile. Desirable: 6.251000. Actual: 6.427222.
+  //   5th percentile. Desirable: 0.352000. Actual: 0.365222.
+  //   95th percentile. Desirable: 7.815000. Actual: 7.613992.
+  //
+  // The corresponding RMSE values are:
+  //   X: 0.0635
+  //   Y: 0.0918
+  //   VX: 0.3380
+  //   VY: 0.2259
+  std_a_ = 0.3;      // Process noise standard deviation longitudinal acceleration in m/s^2.
+  std_yawdd_ = 0.3;  // Process noise standard deviation yaw acceleration in rad/s^2.
 
   // Provided by the manufacturer (do not modify!).
   const double std_laser_px = 0.15;  // Laser measurement noise standard deviation position1 in m.
@@ -64,9 +83,15 @@ UKF::UKF() {
   Xsig_aug_ = MatrixXd(n_aug_, 2 * n_aug_ + 1);
   Xsig_pred_ = MatrixXd(n_x_, 2 * n_aug_ + 1);
   weights_ = VectorXd(2 * n_aug_ + 1);
+
+  // Output streams for NIS values.
+  nis_laser_.open("nis_laser.txt");
+  nis_radar_.open("nis_radar.txt");
 }
 
 UKF::~UKF() {
+  nis_laser_.close();
+  nis_radar_.close();
 }
 
 void UKF::ProcessMeasurement(const MeasurementPackage& meas_package) {
@@ -104,7 +129,6 @@ void UKF::Initialize(const MeasurementPackage& meas_package) {
     case MeasurementPackage::RADAR: {
       const float rho = meas_package.raw_measurements_[0];
       const float phi = meas_package.raw_measurements_[1];
-      const float rho_dot = meas_package.raw_measurements_[2];
       // Convert polar coordinates to cartesian coordinates.
       px = rho * cos(phi);
       py = rho * sin(phi);
@@ -219,7 +243,8 @@ void UKF::UpdateLidar(const MeasurementPackage& meas_package) {
     Zsig(1,i) = Xsig_pred_(1,i);  // py
   }
 
-  Update(meas_package, Zsig, R_laser_);
+  nis_laser_ << Update(meas_package, Zsig, R_laser_) << std::endl;
+  nis_laser_.flush();
 }
 
 void UKF::UpdateRadar(const MeasurementPackage& meas_package) {
@@ -240,10 +265,11 @@ void UKF::UpdateRadar(const MeasurementPackage& meas_package) {
     Zsig(2, i) = (px * vx + py * vy) / EnforceNotZero(Zsig(0, i));
   }
 
-  Update(meas_package, Zsig, R_radar_);
+  nis_radar_ << Update(meas_package, Zsig, R_radar_) << std::endl;
+  nis_radar_.flush();
 }
 
-void UKF::Update(const MeasurementPackage& meas_package,
+double UKF::Update(const MeasurementPackage& meas_package,
                  const MatrixXd& Zsig,
                  const MatrixXd& R /* noise covariance matrix */) {
   const int nz = Zsig.rows();
@@ -281,7 +307,9 @@ void UKF::Update(const MeasurementPackage& meas_package,
   S = S + R;
   MatrixXd K = Tc * S.inverse();  // Kalman gain.
   VectorXd z_diff = meas_package.raw_measurements_ - z_pred;
-  z_diff(1) = NormalizeAngle(z_diff(1));
+  if (should_normalize_angle) {
+    z_diff(1) = NormalizeAngle(z_diff(1));
+  }
 
   // Update state mean and covariance matrix.
   x_ = x_ + K * z_diff;
@@ -289,5 +317,6 @@ void UKF::Update(const MeasurementPackage& meas_package,
   std::cout << "x: " << x_ << std::endl;
   std::cout << "P: " << P_ << std::endl;
 
-  // TODO: Calculate NIS.
+  // Calculate NIS (Normalized Innovation Squared) for consistency check.
+  return z_diff.transpose() * S.inverse() * z_diff;
 }
